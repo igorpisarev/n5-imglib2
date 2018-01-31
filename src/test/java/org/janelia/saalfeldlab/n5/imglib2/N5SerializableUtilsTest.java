@@ -4,6 +4,9 @@ import static org.junit.Assert.fail;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -17,6 +20,7 @@ import org.janelia.saalfeldlab.n5.N5FSWriter;
 import org.janelia.saalfeldlab.n5.N5Writer;
 import org.janelia.saalfeldlab.n5.RawCompression;
 import org.janelia.saalfeldlab.n5.XzCompression;
+import org.janelia.saalfeldlab.n5.imglib2.list.N5SerializableUtils;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -25,15 +29,33 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import net.imglib2.RandomAccessibleInterval;
-import net.imglib2.img.array.ArrayImg;
-import net.imglib2.img.array.ArrayImgs;
-import net.imglib2.type.numeric.integer.UnsignedShortType;
+import net.imglib2.img.list.ListImg;
 import net.imglib2.util.Pair;
 import net.imglib2.view.Views;
 
-public class N5UtilsTest
+public class N5SerializableUtilsTest
 {
-	static private String testDirPath = System.getProperty("user.home") + "/tmp/n5-imglib2-test";
+	private static class Item implements Serializable
+	{
+		private static final long serialVersionUID = -5954864712516585761L;
+
+		public final short val;
+		public final int pos;
+
+		public Item( final short val, final int pos )
+		{
+			this.val = val;
+			this.pos = pos;
+		}
+
+		@Override
+		public String toString()
+		{
+			return String.format( "%d->%d", pos, val );
+		}
+	}
+
+	static private String testDirPath = System.getProperty("user.home") + "/tmp/n5-imglib2-listimg-test";
 
 	static private String datasetName = "/test/group/dataset";
 
@@ -41,7 +63,7 @@ public class N5UtilsTest
 
 	static private int[] blockSize = new int[]{ 5, 7, 9 };
 
-	static short[] data;
+	static private List< Item > data;
 
 	static private N5Writer n5;
 
@@ -70,9 +92,13 @@ public class N5UtilsTest
 
 		final Random rnd = new Random();
 
-		data = new short[ ( int )( dimensions[ 0 ] * dimensions[ 1 ] * dimensions[ 2 ] ) ];
-		for ( int i = 0; i < data.length; ++i )
-			data[ i ] = ( short )rnd.nextInt();
+		final int numElements = ( int )( dimensions[ 0 ] * dimensions[ 1 ] * dimensions[ 2 ] );
+		data = new ArrayList<>( numElements );
+		for ( int i = 0; i < numElements; ++i )
+		{
+			final short val = ( short ) rnd.nextInt();
+			data.add( new Item( val, i ) );
+		}
 	}
 
 	/**
@@ -80,7 +106,7 @@ public class N5UtilsTest
 	 */
 	@AfterClass
 	public static void rampDownAfterClass() throws Exception {
-		n5.remove();
+		n5.remove("");
 	}
 
 	@Before
@@ -96,21 +122,21 @@ public class N5UtilsTest
 	{
 		for ( final Compression compression : getCompressions() )
 		{
-			System.out.println( "Testing n5-imglib2 using primitive type with compression=" + compression.getType() );
-			final ArrayImg< UnsignedShortType, ? > img = ArrayImgs.unsignedShorts( data, dimensions );
+			System.out.println( "Testing n5-imglib2 using serializable type with compression=" + compression.getType() );
+			final ListImg< Item > listImg = new ListImg<>( data, dimensions );
 			try
 			{
-				N5Utils.save( img, n5, datasetName, blockSize, compression );
-				RandomAccessibleInterval< UnsignedShortType > loaded = N5Utils.open( n5, datasetName );
-				for ( final Pair< UnsignedShortType, UnsignedShortType > pair : Views.flatIterable( Views.interval( Views.pair( img, loaded ), img ) ) )
-					Assert.assertEquals( pair.getA().get(), pair.getB().get() );
+				N5SerializableUtils.save( listImg, n5, datasetName, blockSize, compression );
+				RandomAccessibleInterval< Item > loaded = N5SerializableUtils.open( n5, datasetName );
+				for ( final Pair< Item, Item > pair : Views.flatIterable( Views.interval( Views.pair( listImg, loaded ), listImg ) ) )
+					Assert.assertEquals( pair.getA().toString(), pair.getB().toString() );
 				Assert.assertTrue( n5.remove( datasetName ) );
 
 				final ExecutorService exec = Executors.newFixedThreadPool( 4 );
-				N5Utils.save( img, n5, datasetName, blockSize, compression, exec );
-				loaded = N5Utils.open( n5, datasetName );
-				for ( final Pair< UnsignedShortType, UnsignedShortType > pair : Views.flatIterable( Views.interval( Views.pair( img, loaded ), img ) ) )
-					Assert.assertEquals( pair.getA().get(), pair.getB().get() );
+				N5SerializableUtils.save( listImg, n5, datasetName, blockSize, compression, exec );
+				loaded = N5SerializableUtils.open( n5, datasetName );
+				for ( final Pair< Item, Item > pair : Views.flatIterable( Views.interval( Views.pair( listImg, loaded ), listImg ) ) )
+					Assert.assertEquals( pair.getA().toString(), pair.getB().toString() );
 				Assert.assertTrue( n5.remove( datasetName ) );
 				exec.shutdown();
 			}
